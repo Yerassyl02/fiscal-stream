@@ -67,6 +67,7 @@ def generate_dirty_fiscal_line():
         })
 
     total_sum = sum(item['Total'] for item in items)
+    payment = random.choice(['Cash', 'Card', 'QR'])
 
     fiscal_sign  = fake.random_number(digits=10)
 
@@ -101,6 +102,7 @@ def generate_dirty_fiscal_line():
             'DateTime': date_time,
             'Items': items,
             'TotalSum': total_sum,
+            'Payment': payment,
             'FiscalSign (ФП)': fiscal_sign,
             'OFD': ofd,
             'Address': address,
