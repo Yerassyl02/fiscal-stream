@@ -14,22 +14,45 @@ with open("products.json", "r", encoding="utf-8") as f:
 
 def generate_dirty_fiscal_line():
     company_name = fake.company()
-    tax_payer_iin = fake.random_number(digits=12)
+
+    # tax_payer_iin = fake.random_number(digits=12)
+    # RAW ROW
+    tax_payer_iin = random.choice([
+        fake.random_number(digits=12), # CORRECT DATA
+        fake.random_number(digits=11),   # короткий
+        str(fake.random_number(digits=12)) + fake.lexify('?', letters='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ') # с буквой
+    ])
+
     kkt_factor_number = fake.bothify('?#########')
     kkt_reg_number = fake.random_number(digits=12)
     receipt_number = fake.random_int(min=1, max=999999)
-    date_time = datetime.now().strftime('%Y-%m-%d, %H:%M:%S')
+
+    # date_time = datetime.now().strftime('%Y-%m-%d, %H:%M:%S')
+    # дата может быть в разных форматах
+    date_time = random.choice([
+        datetime.now().strftime('%Y-%m-%d, %H:%M:%S'), # CORRECT DATA
+        datetime.now().strftime('%d.%m.%y %H:%M'),
+        datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    ])
 
     # orders
     items = []
     for _ in range(random.randint(1, 15)):
         category = random.choice(list(products_data.keys()))
+
         product = random.choice(products_data[category]) 
+        # иногда делаем опечатки/символы
+        if random.random() < 0.3:
+            product += random.choice(["!!!", "***", "??", " "])
+
         price = round(random.uniform(100, 500000), 2)
         quantity = random.randint(1, 5)
         total =round(price * quantity, 2)
-        vat_rate = random.choice(['12%', '0%'])
-        vat_sum = round(total * (0.12 if vat_rate == '12%' else 0), 2)
+
+        # vat_rate = random.choice(['12%', '0%'])
+        # vat_sum = round(total * (0.12 if vat_rate == '12%' else 0), 2)
+        vat_rate = random.choice(['12%', '0%', '12%%', '', '8%0'])
+        vat_sum = round(total * (0.12 if vat_rate.startswith('12') else 0), 2)
 
         items.append({
             'Category': category,
@@ -54,8 +77,19 @@ def generate_dirty_fiscal_line():
         'Site': ofd_site
     }
 
-    address = f"{fake.city()}, {fake.street_address()}"
-    qr_code = fake.lexify(text="????????????????????????")
+    # address = f"{fake.city()}, {fake.street_address()}"
+    address = random.choice([
+        f"{fake.city()}, {fake.street_address()}",
+        "unknown",
+        ""
+    ])
+
+    # qr_code = fake.lexify(text="????????????????????????")
+    qr_code = random.choice([
+        fake.lexify(text="????????????????????????"),
+        "",  # пустой
+        "битый_qr_code"
+    ])
 
     return (
         {
@@ -66,6 +100,7 @@ def generate_dirty_fiscal_line():
             'ReceiptNumber': receipt_number,
             'DateTime': date_time,
             'Items': items,
+            'TotalSum': total_sum,
             'FiscalSign (ФП)': fiscal_sign,
             'OFD': ofd,
             'Address': address,
@@ -79,9 +114,6 @@ async def stream():
         while True:
             await asyncio.sleep(random.uniform(0.5, 2.5))  # рандомная задержка
             line = generate_dirty_fiscal_line()
-            yield {
-                "event": "dirty_fiscal_log",
-                "data": line
-            }
+            yield json.dumps(line, indent=4, ensure_ascii=False)
 
     return EventSourceResponse(event_generator())
