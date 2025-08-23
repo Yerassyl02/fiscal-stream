@@ -1,0 +1,127 @@
+version: "3.8"
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.9
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    ports: ["2181:2181"]
+
+  kafka:
+    image: bitnami/kafka:3.7
+    depends_on: [zookeeper]
+    ports: ["9092:9092", "29092:29092"]
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT = zookeeper:2181
+      - KAFKA_CFG_LISTENERS = PLAINTEXT://:9092, PLAINTEXT_HOST://:29092
+      - KAFKA_CFG_ADVERTISED_LISTENERS = PLAINTEXT://kafka:9092, PLAINTEXT_HOST://localhost:29092 
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE = true
+      - ALLOW_PLAINTEXT_LISTENER = yes
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on: [kafka]
+    ports: ["8080:8080"]
+    environment:
+      - KAFKA_CLUSTER_0_NAME = local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS = kafka:9092
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports: ["9002:9000", "9001:9001"]
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+  
+  minio-mc:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb -p local/raw;
+      mc mb -p local/clean;
+      tail -f /dev/null
+      "
+
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=fiscal
+    ports: ["5432:5432"]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./sql/postgres.sql:/docker-entrypoint-initdb.d/01_postgres.sql:ro
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.6
+    ports: ["8123:8123", "9009:9009", "9000:9000"]
+    volumes:
+      - ch_data:/var/lib/clickhouse
+      - ./sql/clickhouse.sql:/docker-entrypoint-initdb.d/clickhouse.sql:ro
+
+  # grafana:
+  #   image: grafana/grafana:11.1.3
+  #   depends_on: [clickhouse, postgres]
+  #   ports: ["3000:3000"]
+  #   environment:
+  #     - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+  #     - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+
+  #  my fiscal api [folder /fiscal_source]
+  fiscal-source:
+    build: ./fiscal_source
+    ports: ["8000:8000"]
+
+  # [folder /sse_producer]
+  # sse-producer:
+  #   build: ./sse_producer
+  #   depends_on: [fiscal-source, kafka]
+
+  spark-master:
+    image: bitnami/spark:3.5
+    environment:
+      - SPARK_MODE=master
+    ports: ["7077:7077", "8081:8080"]
+
+  spark-worker:
+    image: bitnami/spark:3.5
+    depends_on: [spark-master]
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+
+  spark-job:
+    image: bitnami/spark:3.5
+    depends_on: [spark-master, kafka, minio, postgres, clickhouse]
+    volumes:
+      - ./spark_job:/opt/app
+    entrypoint: >
+      bash -lc "
+      /opt/bitnami/spark/bin/spark-submit
+      --master spark://spark-master:7077
+      --packages
+      org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,
+      org.postgresql:postgresql:42.7.3,
+      com.clickhouse:clickhouse-jdbc:0.6.2,
+      org.apache.hadoop:hadoop-aws:3.3.4,
+      com.amazonaws:aws-java-sdk-bundle:1.12.262
+      --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000
+      --conf spark.hadoop.fs.s3a.access.key=minio
+      --conf spark.hadoop.fs.s3a.secret.key=minio123
+      --conf spark.hadoop.fs.s3a.path.style.access=true
+      --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+      /opt/app/stream_job.py
+      "
+
+volumes:
+  minio_data:
+  pg_data:
+  ch_data:
