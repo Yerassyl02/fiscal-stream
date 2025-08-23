@@ -61,6 +61,10 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.6
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DB=analytics
     ports: ["8123:8123", "9009:9009", "9000:9000"]
     volumes:
       - ch_data:/var/lib/clickhouse
