@@ -18,8 +18,8 @@ def generate_dirty_fiscal_line():
     # tax_payer_iin = fake.random_number(digits=12)
     # RAW ROW
     tax_payer_iin = random.choice([
-        fake.random_number(digits=12), # CORRECT DATA
-        fake.random_number(digits=11),   # короткий
+        str(fake.random_number(digits=12)), # CORRECT DATA
+        str(fake.random_number(digits=11)),   # короткий
         str(fake.random_number(digits=12)) + fake.lexify('?', letters='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ') # с буквой
     ])
 
@@ -30,9 +30,9 @@ def generate_dirty_fiscal_line():
     # date_time = datetime.now().strftime('%Y-%m-%d, %H:%M:%S')
     # дата может быть в разных форматах
     date_time = random.choice([
-        datetime.now().strftime('%Y-%m-%d, %H:%M:%S'), # CORRECT DATA
-        datetime.now().strftime('%d.%m.%y %H:%M'),
-        datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+        fake.date_time_this_year().strftime('%Y-%m-%d, %H:%M:%S'),  # CORRECT DATA
+        fake.date_time_this_year().strftime('%d.%m.%y %H:%M'),
+        fake.date_time_this_year().strftime('%d/%m/%Y %H:%M:%S')
     ])
 
     # orders
@@ -116,6 +116,6 @@ async def stream():
         while True:
             await asyncio.sleep(random.uniform(0.5, 2.5))  # рандомная задержка
             line = generate_dirty_fiscal_line()
-            yield json.dumps(line, indent=4, ensure_ascii=False)
+            yield json.dumps(line, ensure_ascii=False)
 
     return EventSourceResponse(event_generator())

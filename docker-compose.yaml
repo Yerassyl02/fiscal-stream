@@ -12,19 +12,37 @@ services:
     depends_on: [zookeeper]
     ports: ["9092:9092", "29092:29092"]
     environment:
-      - KAFKA_CFG_ZOOKEEPER_CONNECT = zookeeper:2181
-      - KAFKA_CFG_LISTENERS = PLAINTEXT://:9092, PLAINTEXT_HOST://:29092
-      - KAFKA_CFG_ADVERTISED_LISTENERS = PLAINTEXT://kafka:9092, PLAINTEXT_HOST://localhost:29092 
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE = true
-      - ALLOW_PLAINTEXT_LISTENER = yes
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    healthcheck:
+      test: ["CMD", "bash", "-c", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka-init:
+    image: bitnami/kafka:3.7
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: >
+      bash -c "
+      kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic fiscal_row --partitions 1 --replication-factor 1;
+      tail -f /dev/null
+      "
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     depends_on: [kafka]
     ports: ["8080:8080"]
     environment:
-      - KAFKA_CLUSTER_0_NAME = local
-      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS = kafka:9092
+      - KAFKA_CLUSTER_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
 
   minio:
     image: minio/minio:latest
@@ -33,8 +51,8 @@ services:
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-    volumes:
-      - minio_data:/data
+    # volumes:
+      # - minio_data:/data # if you wanna save data after [docker compose down]
   
   minio-mc:
     image: minio/mc:latest
@@ -56,7 +74,7 @@ services:
       - POSTGRES_DB=fiscal
     ports: ["5432:5432"]
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      # - pg_data:/var/lib/postgresql/data # if you wanna save data after [docker compose down]
       - ./sql/postgres.sql:/docker-entrypoint-initdb.d/01_postgres.sql:ro
 
   clickhouse:
@@ -67,7 +85,7 @@ services:
       - CLICKHOUSE_DB=analytics
     ports: ["8123:8123", "9009:9009", "9000:9000"]
     volumes:
-      - ch_data:/var/lib/clickhouse
+      # - ch_data:/var/lib/clickhouse # if you wanna save data after [docker compose down]
       - ./sql/clickhouse.sql:/docker-entrypoint-initdb.d/clickhouse.sql:ro
 
   # grafana:
@@ -85,9 +103,13 @@ services:
     ports: ["8000:8000"]
 
   # [folder /sse_producer]
-  # sse-producer:
-  #   build: ./sse_producer
-  #   depends_on: [fiscal-source, kafka]
+  sse-producer:
+    build: ./sse_producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      fiscal-source:
+        condition: service_started
 
   spark-master:
     image: bitnami/spark:3.5
@@ -103,29 +125,35 @@ services:
       - SPARK_MASTER_URL=spark://spark-master:7077
 
   spark-job:
-    image: bitnami/spark:3.5
+    build: ./spark_job
+    user: "root"                     # запускаем от root, чтобы был доступ к /root/.ivy2
     depends_on: [spark-master, kafka, minio, postgres, clickhouse]
+    environment:
+      - HOME=/root
+      - HADOOP_USER_NAME=root
+      - PYSPARK_PYTHON=/usr/bin/python3
+      - PYSPARK_DRIVER_PYTHON=/usr/bin/python3
     volumes:
-      - ./spark_job:/opt/app
-    entrypoint: >
+      - ./spark_job:/opt/app         # твои скрипты
+      - ./ivy_cache:/root/.ivy2      # локальный кеш зависимостей Ivy
+    entrypoint: >-
       bash -lc "
+      mkdir -p /root/.ivy2 &&
       /opt/bitnami/spark/bin/spark-submit
       --master spark://spark-master:7077
-      --packages
-      org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,
-      org.postgresql:postgresql:42.7.3,
-      com.clickhouse:clickhouse-jdbc:0.6.2,
-      org.apache.hadoop:hadoop-aws:3.3.4,
-      com.amazonaws:aws-java-sdk-bundle:1.12.262
+      --conf spark.jars.ivy=/root/.ivy2
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.3,com.clickhouse:clickhouse-jdbc:0.6.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262
       --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000
-      --conf spark.hadoop.fs.s3a.access.key=minio
-      --conf spark.hadoop.fs.s3a.secret.key=minio123
+      --conf spark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER}
+      --conf spark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD}
       --conf spark.hadoop.fs.s3a.path.style.access=true
       --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
-      /opt/app/stream_job.py
-      "
+      --conf spark.hadoop.security.authentication=Simple
+      --conf spark.hadoop.security.authorization=false
+      /opt/app/stream_job.py"
 
-volumes:
-  minio_data:
-  pg_data:
-  ch_data:
+# if you wanna save data after [docker compose down]
+# volumes:
+#   minio_data:
+#   pg_data:
+#   ch_data:
