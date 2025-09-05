@@ -1,4 +1,5 @@
 import os
+import re
 from pyspark.sql import SparkSession, functions as F, types as T
 from validators import parse_dt, valid_iin, normalize_city, normalize_address, valid_vat
 
@@ -9,7 +10,7 @@ spark = (
 
 spark.sparkContext.setLogLevel("WARN")
 
-# VALIDATORS
+# VALIDATORS [IF YOU WANNA WORK WITH UDF]
 # udf_parse_dt = F.udf(lambda s: parse_dt(s), T.TimestampType())
 # udf_valid_iin = F.udf(lambda s: bool(valid_iin(s)), T.BooleanType())
 # udf_city = F.udf(lambda s: normalize_city(s), T.StringType())
@@ -25,6 +26,10 @@ event_time = F.coalesce(
 )
 
 iin_valid = F.col("TaxPayerIIN").rlike(r"^\d{12}$")
+
+unvalid_endigs = ['!!!', '***', '??', ' ']
+
+product_pattern = r"(?:{}+$)".format("|".join(re.escape(e) for e in unvalid_endigs))
 
 city = F.when(
     (F.col("Address").isNotNull()) & (F.col("Address") != "") & (F.col("Address") != "unknown"),
@@ -49,7 +54,7 @@ qr_code_valid = F.when(
     F.col("QRCode")
 )
 
-# ============================================================
+# ////============================================================
 
 # read Kafka
 raw = (
@@ -80,10 +85,6 @@ schema = T.StructType([
             T.StructField("UnitPrice", T.DoubleType()),
             T.StructField("Quantity", T.IntegerType()),
             T.StructField("Total", T.DoubleType())
-            # T.StructField("VAT", T.StructType([
-            #     T.StructField("Rate", T.StringType()),
-            #     T.StructField("Sum", T.DoubleType()),
-            # ])),
         ])
     )),
     T.StructField("TotalSum", T.DoubleType()),
@@ -99,6 +100,7 @@ schema = T.StructType([
     T.StructField("QRCode", T.StringType()),
 ])
 
+# UDF DATETIME VALIDATOR
 # df = (
 #     json_str
 #     .select(F.from_json("json", schema).alias("d"))
@@ -115,11 +117,12 @@ df = (
     .withColumn("DateTime_ts", event_time)
     )
 
-# ============================================================
+# ////============================================================
 
 
 
-# RAW data to MinIO [parquet]
+# RAW data to MinIO [parquet] 
+# UDF DATETIME
 # df_with_month = df.withColumn(
 #     "DateTime_ts",
 #     F.coalesce(
@@ -136,7 +139,7 @@ df_with_month = df.withColumn(
     event_time
 ).withColumn("year_month", F.date_format("DateTime_ts", "yyyy-MM"))
 
-# ============================================================
+# ////============================================================
 
 
 raw_sink = (
@@ -151,8 +154,7 @@ raw_sink = (
     .start()
 )
 
-# VALIDIOTION
-
+# VALIDATITION WITH UDF
 # enriched = (
 #     df
 #     .withColumn("event_time", udf_parse_dt("DateTime"))
@@ -177,13 +179,11 @@ enriched = (
     .withColumn("iin_valid", iin_valid)
     .withColumn("address_correct", address_correct)
 
-    # .withColumn("main_vat_rate",
-    #             F.when(F.size("Items") > 0, F.col("Items")[0]["VAT"]["Rate"]).otherwise(F.lit("")))
     .withColumn("main_vat_rate",
                 F.when(F.size("Items") > 0, F.col("VatRate")).otherwise(F.lit("")))
     .withColumn("vat_valid", vat_valid)
-    .withColumn("qr_code_valid", qr_code_valid)
 
+    .withColumn("qr_code_valid", qr_code_valid)
     .withColumn("is_clean", 
                 F.col("event_time").isNotNull() &
                 F.col("iin_valid") &
@@ -194,7 +194,7 @@ enriched = (
                 )
 )
 
-# ============================================================
+# ////============================================================
 
 clean = (
     enriched
@@ -235,12 +235,10 @@ clean_exploded = (
 
         # поля из Items
         F.col("item.Category").alias("category"),
-        F.col("item.Name").alias("product_name"),
+        F.regexp_replace(F.col("item.Name"), product_pattern, "").alias("product_name"),
         F.col("item.UnitPrice").cast("decimal(18,2)").alias("unit_price"),
         F.col("item.Quantity").cast("long").alias("quantity"),
         F.col("item.Total").cast("decimal(18,2)").alias("total_amount_by_position"),
-        # F.col("item.VAT.Rate").alias("vat_rate"),
-        # F.col("item.VAT.Sum").cast("decimal(18,2)").alias("vat_sum"),
 
         F.col("total_sum").cast("decimal(18,2)").alias("total_sum"),
         F.col("vat_rate").alias("vat_rate"),
@@ -272,7 +270,7 @@ errors = (
     )
 )
 
-# CLEANED DATA TO DATABASES [CLICKHOUSE, POSTGRESQL]
+# CLEANED/ERRORS DATA TO DATABASES [CLICKHOUSE, POSTGRESQL]
 # CLEAN => CLICKHOUSE
 clean_writes = (
     clean_exploded.writeStream
