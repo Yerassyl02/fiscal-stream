@@ -15,7 +15,6 @@ with open("products.json", "r", encoding="utf-8") as f:
 def generate_dirty_fiscal_line():
     company_name = fake.company()
 
-    # tax_payer_iin = fake.random_number(digits=12)
     # RAW ROW
     tax_payer_iin = random.choice([
         str(fake.random_number(digits=12)), # CORRECT DATA
@@ -27,7 +26,6 @@ def generate_dirty_fiscal_line():
     kkt_reg_number = fake.random_number(digits=12)
     receipt_number = fake.random_int(min=1, max=999999)
 
-    # date_time = datetime.now().strftime('%Y-%m-%d, %H:%M:%S')
     # дата может быть в разных форматах
     date_time = random.choice([
         fake.date_time_this_year().strftime('%Y-%m-%d, %H:%M:%S'),  # CORRECT DATA
@@ -47,26 +45,26 @@ def generate_dirty_fiscal_line():
 
         price = round(random.uniform(100, 500000), 2)
         quantity = random.randint(1, 5)
-        total =round(price * quantity, 2)
+        total = round(price * quantity, 2)
 
-        # vat_rate = random.choice(['12%', '0%'])
-        # vat_sum = round(total * (0.12 if vat_rate == '12%' else 0), 2)
-        vat_rate = random.choice(['12%', '0%', '12%%', '', '8%0'])
-        vat_sum = round(total * (0.12 if vat_rate.startswith('12') else 0), 2)
+        # vat_rate = random.choice(['12%', '0%', ''])
+        # vat_sum = round(total * (0.12 if vat_rate.startswith('12') else 0), 2)
 
         items.append({
             'Category': category,
             'Name': product,
             'UnitPrice': price,
             'Quantity': quantity,
-            'Total': total,
-            'VAT': {
-                'Rate': vat_rate,
-                'Sum': vat_sum
-            }
+            'Total': total
+            # 'VAT': {
+            #     'Rate': vat_rate,
+            #     'Sum': vat_sum
+            # }
         })
 
     total_sum = sum(item['Total'] for item in items)
+    vat_rate = random.choice(['12%', '0%', ''])
+    vat_sum = round(total_sum * (0.12 if vat_rate.startswith('12') else 0), 2)
     payment = random.choice(['Cash', 'Card', 'QR'])
 
     fiscal_sign  = fake.random_number(digits=10)
@@ -78,14 +76,12 @@ def generate_dirty_fiscal_line():
         'Site': ofd_site
     }
 
-    # address = f"{fake.city()}, {fake.street_address()}"
     address = random.choice([
         f"{fake.city()}, {fake.street_address()}",
         "unknown",
         ""
     ])
 
-    # qr_code = fake.lexify(text="????????????????????????")
     qr_code = random.choice([
         fake.lexify(text="????????????????????????"),
         "",  # пустой
@@ -102,6 +98,8 @@ def generate_dirty_fiscal_line():
             'DateTime': date_time,
             'Items': items,
             'TotalSum': total_sum,
+            'VatRate': vat_rate,
+            'VatSum': vat_sum,
             'Payment': payment,
             'FiscalSign (ФП)': fiscal_sign,
             'OFD': ofd,

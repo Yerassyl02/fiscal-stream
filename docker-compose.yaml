@@ -152,7 +152,6 @@ services:
       --conf spark.hadoop.security.authorization=false
       /opt/app/stream_job.py"
 
-# if you wanna save data after [docker compose down]
 # volumes:
 #   minio_data:
 #   pg_data:

@@ -10,3 +10,5 @@ RUN install_packages python3 python3-pip
 # (опционально) Указываем Spark использовать именно этот python
 ENV PYSPARK_PYTHON=/usr/bin/python3
 ENV PYSPARK_DRIVER_PYTHON=/usr/bin/python3
+
+USER 1001
